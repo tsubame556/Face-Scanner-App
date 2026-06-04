@@ -15,6 +15,8 @@ OUTPUT_DIR = "data/outputs"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+latest_job_id: Optional[str] = None
+
 @app.post("/api/v1/generate_avatar")
 async def generate_avatar(
     background_tasks: BackgroundTasks,
@@ -26,7 +28,10 @@ async def generate_avatar(
     """
     iPhoneスキャンアプリからデータを受け取り、アバター生成パイプラインを非同期で開始する
     """
+    global latest_job_id
     job_id = str(uuid.uuid4())
+    latest_job_id = job_id
+    
     job_dir = os.path.join(UPLOAD_DIR, job_id)
     os.makedirs(job_dir, exist_ok=True)
     
@@ -104,3 +109,12 @@ async def download_avatar(job_id: str):
     if os.path.exists(final_glb_path):
         return FileResponse(final_glb_path, media_type="model/gltf-binary", filename=f"{job_id}_avatar.glb")
     return {"error": "not_found"}
+
+@app.get("/api/v1/jobs/latest")
+async def get_latest_job():
+    """
+    最新のJob IDを取得する（Unityの自動同期用）
+    """
+    if latest_job_id:
+        return {"job_id": latest_job_id}
+    return {"error": "no_jobs"}
