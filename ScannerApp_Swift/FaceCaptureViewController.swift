@@ -292,7 +292,7 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         }
         
         // 2. サーバーへ送信 (Multipart Form)
-        let url = URL(string: "http://192.168.x.x:8000/api/v1/generate_avatar")! // 実際のGPUサーバーのIPに変更
+        let url = URL(string: "http://10.46.3.210:8000/api/v1/generate_avatar")! // 実際のGPUサーバーのIPに変更
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         
