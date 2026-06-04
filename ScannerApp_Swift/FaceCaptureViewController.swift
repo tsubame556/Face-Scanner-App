@@ -257,16 +257,15 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         for t in geometry.textureCoordinates {
             objData += "vt \(t.x) \(t.y)\n"
         }
-        for n in geometry.normals {
-            objData += "vn \(n.x) \(n.y) \(n.z)\n"
-        }
+        
         // indicesは[v1, v2, v3, v1, v2, v3...]の1次元配列
         let indices = geometry.triangleIndices
         for i in stride(from: 0, to: indices.count, by: 3) {
             let i1 = indices[i] + 1
             let i2 = indices[i+1] + 1
             let i3 = indices[i+2] + 1
-            objData += "f \(i1)/\(i1)/\(i1) \(i2)/\(i2)/\(i2) \(i3)/\(i3)/\(i3)\n"
+            // 法線(vn)は省略し、頂点(v)とテクスチャ座標(vt)のみを指定
+            objData += "f \(i1)/\(i1) \(i2)/\(i2) \(i3)/\(i3)\n"
         }
         
         // 2. サーバーへ送信 (Multipart Form)
@@ -323,9 +322,7 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
 // MARK: - Custom UI View (進捗リング)
 class ProgressRingView: UIView {
     
-    private let shapeLayer = CAShapeLayer()
-    private let dashCount = 8
-    private var completedDashes = 0
+    private var segmentLayers: [HeadDirection: CAShapeLayer] = [:]
     
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -339,35 +336,54 @@ class ProgressRingView: UIView {
     private func setupRing() {
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
         let radius = bounds.width / 2 - 10
+        let segmentAngle = (2 * CGFloat.pi) / 8.0
+        let gap: CGFloat = 0.08 // セグメント間の隙間
         
-        let path = UIBezierPath(arcCenter: center, radius: radius, startAngle: -.pi / 2, endAngle: 3 * .pi / 2, clockwise: true)
+        // 各方向に対応する中心角度 (0 は 3時の方向)
+        let directionsMap: [(HeadDirection, CGFloat)] = [
+            (.right, 0),
+            (.downRight, .pi / 4),
+            (.down, .pi / 2),
+            (.downLeft, 3 * .pi / 4),
+            (.left, .pi),
+            (.upLeft, 5 * .pi / 4),
+            (.up, 3 * .pi / 2),
+            (.upRight, 7 * .pi / 4)
+        ]
         
-        shapeLayer.path = path.cgPath
-        shapeLayer.fillColor = UIColor.clear.cgColor
-        shapeLayer.strokeColor = UIColor.darkGray.cgColor
-        shapeLayer.lineWidth = 15
-        shapeLayer.lineCap = .round
-        
-        // 破線グラフ（ダッシュ）の設定
-        let circumference = 2 * .pi * radius
-        let dashLength = circumference / CGFloat(dashCount) - 10
-        shapeLayer.lineDashPattern = [NSNumber(value: Float(dashLength)), 10]
-        
-        layer.addSublayer(shapeLayer)
+        for (direction, angle) in directionsMap {
+            let startAngle = angle - segmentAngle / 2 + gap
+            let endAngle = angle + segmentAngle / 2 - gap
+            
+            let path = UIBezierPath(arcCenter: center,
+                                    radius: radius,
+                                    startAngle: startAngle,
+                                    endAngle: endAngle,
+                                    clockwise: true)
+            
+            let layer = CAShapeLayer()
+            layer.path = path.cgPath
+            layer.fillColor = UIColor.clear.cgColor
+            layer.strokeColor = UIColor.darkGray.cgColor // 未取得はダークグレー
+            layer.lineWidth = 15
+            layer.lineCap = .round
+            
+            self.layer.addSublayer(layer)
+            segmentLayers[direction] = layer
+        }
     }
     
     func updateProgress(for direction: HeadDirection) {
-        // 対象の方向をクリアしたら、リングの色を徐々に緑にする（疑似的な進捗）
-        completedDashes += 1
-        let progress = CGFloat(completedDashes) / CGFloat(8) // 8方向
-        
-        // strokeEnd を使って緑の進捗を描画するレイヤーを重ねるなど、よりリッチにできます
-        // ここではシンプルに線の色自体を緑に近づけます
-        shapeLayer.strokeColor = UIColor(red: 1.0 - progress, green: progress, blue: 0.0, alpha: 1.0).cgColor
+        // 対象の方向を取得したら、その部分の円弧だけを緑色に変更する
+        if let layer = segmentLayers[direction] {
+            layer.strokeColor = UIColor.systemGreen.cgColor
+        }
     }
     
     func setCompleted() {
-        shapeLayer.strokeColor = UIColor.systemGreen.cgColor
+        for layer in segmentLayers.values {
+            layer.strokeColor = UIColor.systemGreen.cgColor
+        }
         
         // 完了のポップアニメーション
         UIView.animate(withDuration: 0.3, animations: {
