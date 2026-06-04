@@ -30,3 +30,6 @@
 
 ## 2026-06-04 (Update 7)
 - **設定変更**: iOSアプリからMacへの通信URLをIPアドレス（10.46.3.210）からBonjourホスト名（yamamotokyousoranonotobukkukonpyuta.local）に変更。Wi-Fiの隔離設定を回避し、USBケーブル経由でも通信できるように修正。
+
+## 2026-06-04 (Update 8)
+- **ドキュメント作成**: README.mdを作成し、全体の処理フローと独自開発の切り分けを文書化。
