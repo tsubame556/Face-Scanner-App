@@ -1,0 +1,290 @@
+import UIKit
+import ARKit
+import SceneKit
+
+enum CaptureState {
+    case initialization
+    case angleScanning   // 顔をぐるっと回して全角度のデータを取るフェーズ
+    case pronunciation   // 「あいうえお」を撮影するフェーズ
+    case completed
+}
+
+// 顔の向くべき8方向（上、下、左、右、斜め4方向）
+enum HeadDirection: Int, CaseIterable {
+    case center = 0, up, down, left, right, upLeft, upRight, downLeft, downRight
+}
+
+class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewDelegate {
+
+    // MARK: - UI Components
+    private var sceneView: ARSCNView!
+    private var instructionLabel: UILabel!
+    private var warningLabel: UILabel!
+    private var progressRing: ProgressRingView!
+    private var pronunciationButton: UIButton!
+    
+    // MARK: - State
+    private var currentState: CaptureState = .initialization
+    private var currentFaceAnchor: ARFaceAnchor?
+    
+    // どの方向を向き終わったかのフラグ
+    private var capturedDirections: Set<HeadDirection> = [.center]
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+        setupARSession()
+    }
+    
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        guard ARFaceTrackingConfiguration.isSupported else {
+            warningLabel.text = "エラー: FaceID(TrueDepth)非対応端末です。"
+            warningLabel.isHidden = false
+            return
+        }
+        let config = ARFaceTrackingConfiguration()
+        config.isLightEstimationEnabled = true
+        sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+    }
+    
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        sceneView.session.pause()
+    }
+
+    // MARK: - Setup
+    private func setupUI() {
+        view.backgroundColor = .black
+        
+        sceneView = ARSCNView(frame: view.bounds)
+        sceneView.delegate = self
+        sceneView.session.delegate = self
+        sceneView.automaticallyUpdatesLighting = true
+        view.addSubview(sceneView)
+        
+        // 進捗リング（FaceID風の円形UI）
+        let ringSize: CGFloat = 280
+        progressRing = ProgressRingView(frame: CGRect(x: 0, y: 0, width: ringSize, height: ringSize))
+        progressRing.center = view.center
+        view.addSubview(progressRing)
+        
+        // 暗さ・影の警告ラベル（リングの上）
+        warningLabel = UILabel()
+        warningLabel.textColor = .systemYellow
+        warningLabel.textAlignment = .center
+        warningLabel.font = UIFont.boldSystemFont(ofSize: 16)
+        warningLabel.numberOfLines = 2
+        warningLabel.isHidden = true
+        warningLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(warningLabel)
+        
+        // 指示ラベル（画面上部）
+        instructionLabel = UILabel()
+        instructionLabel.textColor = .white
+        instructionLabel.textAlignment = .center
+        instructionLabel.font = UIFont.boldSystemFont(ofSize: 20)
+        instructionLabel.numberOfLines = 0
+        instructionLabel.text = "顔を円の中に入れてください"
+        instructionLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(instructionLabel)
+        
+        // あいうえお撮影ボタン（最初は隠しておく）
+        pronunciationButton = UIButton(type: .system)
+        pronunciationButton.setTitle("「あいうえお」撮影開始", for: .normal)
+        pronunciationButton.titleLabel?.font = UIFont.boldSystemFont(ofSize: 18)
+        pronunciationButton.backgroundColor = .systemRed
+        pronunciationButton.setTitleColor(.white, for: .normal)
+        pronunciationButton.layer.cornerRadius = 25
+        pronunciationButton.isHidden = true
+        pronunciationButton.translatesAutoresizingMaskIntoConstraints = false
+        pronunciationButton.addTarget(self, action: #selector(startPronunciationCapture), for: .touchUpInside)
+        view.addSubview(pronunciationButton)
+        
+        NSLayoutConstraint.activate([
+            instructionLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 40),
+            instructionLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            
+            warningLabel.bottomAnchor.constraint(equalTo: progressRing.topAnchor, constant: -20),
+            warningLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            
+            pronunciationButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -40),
+            pronunciationButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            pronunciationButton.widthAnchor.constraint(equalToConstant: 250),
+            pronunciationButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+    }
+    
+    private func setupARSession() {
+        currentState = .angleScanning
+    }
+
+    // MARK: - ARSessionDelegate
+    func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        // 環境光のチェック
+        checkLightingConditions(lightEstimate: frame.lightEstimate)
+    }
+    
+    private func checkLightingConditions(lightEstimate: ARLightEstimate?) {
+        guard let estimate = lightEstimate else { return }
+        
+        var warningText = ""
+        
+        // 部屋の明るさチェック (1000ルーメン以下は暗いと判定)
+        if estimate.ambientIntensity < 800 {
+            warningText += "部屋が暗すぎます。明るい場所へ移動してください。\n"
+        }
+        
+        // 強い影（指向性ライト）のチェック
+        if let directional = estimate as? ARDirectionalLightEstimate {
+            // primaryLightIntensity が強すぎると顔の半分に影ができる
+            if directional.primaryLightIntensity > 1500 {
+                warningText += "顔に強い影が入っています。光の向きを調整してください。"
+            }
+        }
+        
+        DispatchQueue.main.async {
+            self.warningLabel.text = warningText
+            self.warningLabel.isHidden = warningText.isEmpty
+        }
+    }
+
+    // MARK: - ARSCNViewDelegate
+    func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {
+        guard let faceAnchor = anchor as? ARFaceAnchor else { return }
+        currentFaceAnchor = faceAnchor
+        
+        DispatchQueue.main.async {
+            if self.currentState == .angleScanning {
+                self.instructionLabel.text = "顔を円に沿ってゆっくり回してください"
+            }
+        }
+    }
+    
+    func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
+        guard let faceAnchor = anchor as? ARFaceAnchor else { return }
+        currentFaceAnchor = faceAnchor
+        
+        if currentState == .angleScanning {
+            processAngleScanning(transform: faceAnchor.transform)
+        }
+    }
+    
+    // MARK: - Angle Scanning Logic
+    private func processAngleScanning(transform: simd_float4x4) {
+        // TransformマトリックスからEuler角（Pitch, Yaw）を抽出
+        let pitch = asin(max(-1.0, min(1.0, transform.columns.2.y))) // 上下
+        let yaw = atan2(-transform.columns.2.x, transform.columns.2.z) // 左右
+        
+        // 角度（ラジアン）を度数法に変換
+        let pitchDeg = pitch * 180 / .pi
+        let yawDeg = yaw * 180 / .pi
+        
+        // しきい値（約20度顔を傾けたらクリアとする）
+        let threshold: Float = 20.0
+        
+        var detectedDirection: HeadDirection = .center
+        
+        if pitchDeg > threshold {
+            detectedDirection = yawDeg > threshold ? .downLeft : (yawDeg < -threshold ? .downRight : .down)
+        } else if pitchDeg < -threshold {
+            detectedDirection = yawDeg > threshold ? .upLeft : (yawDeg < -threshold ? .upRight : .up)
+        } else {
+            if yawDeg > threshold { detectedDirection = .left }
+            else if yawDeg < -threshold { detectedDirection = .right }
+        }
+        
+        if detectedDirection != .center && !capturedDirections.contains(detectedDirection) {
+            capturedDirections.insert(detectedDirection)
+            
+            DispatchQueue.main.async {
+                self.progressRing.updateProgress(for: detectedDirection)
+                
+                // 8方向すべて完了したか？ (centerを含めて9)
+                if self.capturedDirections.count == HeadDirection.allCases.count {
+                    self.scanningCompleted()
+                }
+            }
+        }
+    }
+    
+    private func scanningCompleted() {
+        currentState = .pronunciation
+        instructionLabel.text = "スキャン完了！\n次に「あいうえお」を撮影します。"
+        progressRing.setCompleted()
+        
+        // 録画ボタンを表示
+        UIView.animate(withDuration: 0.5) {
+            self.pronunciationButton.isHidden = false
+        }
+    }
+
+    // MARK: - Actions
+    @objc private func startPronunciationCapture() {
+        instructionLabel.text = "「あ、い、う、え、お」と\nゆっくりはっきり発音してください"
+        pronunciationButton.setTitle("録画中... (タップで完了)", for: .normal)
+        pronunciationButton.backgroundColor = .systemGray
+        
+        // TODO: ここで動画とDepthの保存を開始する
+    }
+}
+
+// MARK: - Custom UI View (進捗リング)
+class ProgressRingView: UIView {
+    
+    private let shapeLayer = CAShapeLayer()
+    private let dashCount = 8
+    private var completedDashes = 0
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupRing()
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func setupRing() {
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let radius = bounds.width / 2 - 10
+        
+        let path = UIBezierPath(arcCenter: center, radius: radius, startAngle: -.pi / 2, endAngle: 3 * .pi / 2, clockwise: true)
+        
+        shapeLayer.path = path.cgPath
+        shapeLayer.fillColor = UIColor.clear.cgColor
+        shapeLayer.strokeColor = UIColor.darkGray.cgColor
+        shapeLayer.lineWidth = 15
+        shapeLayer.lineCap = .round
+        
+        // 破線グラフ（ダッシュ）の設定
+        let circumference = 2 * .pi * radius
+        let dashLength = circumference / CGFloat(dashCount) - 10
+        shapeLayer.lineDashPattern = [NSNumber(value: Float(dashLength)), 10]
+        
+        layer.addSublayer(shapeLayer)
+    }
+    
+    func updateProgress(for direction: HeadDirection) {
+        // 対象の方向をクリアしたら、リングの色を徐々に緑にする（疑似的な進捗）
+        completedDashes += 1
+        let progress = CGFloat(completedDashes) / CGFloat(8) // 8方向
+        
+        // strokeEnd を使って緑の進捗を描画するレイヤーを重ねるなど、よりリッチにできます
+        // ここではシンプルに線の色自体を緑に近づけます
+        shapeLayer.strokeColor = UIColor(red: 1.0 - progress, green: progress, blue: 0.0, alpha: 1.0).cgColor
+    }
+    
+    func setCompleted() {
+        shapeLayer.strokeColor = UIColor.systemGreen.cgColor
+        
+        // 完了のポップアニメーション
+        UIView.animate(withDuration: 0.3, animations: {
+            self.transform = CGAffineTransform(scaleX: 1.1, y: 1.1)
+        }) { _ in
+            UIView.animate(withDuration: 0.3) {
+                self.transform = .identity
+            }
+        }
+    }
+}

@@ -1,0 +1,9 @@
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+trimesh==4.0.5
+numpy==1.26.2
+opencv-python==4.8.1.78
+scipy==1.11.4
+Pillow==10.1.0
+# PyTorch3D / MediaPipe 等の深層学習ライブラリは、GPU環境(CUDA)に合わせて後日追加
