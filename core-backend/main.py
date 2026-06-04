@@ -92,3 +92,15 @@ async def get_status(job_id: str):
         return {"status": "processing"}
     else:
         return {"status": "not_found"}
+
+from fastapi.responses import FileResponse
+
+@app.get("/api/v1/download/{job_id}")
+async def download_avatar(job_id: str):
+    """
+    生成完了したGLBファイルをダウンロードする
+    """
+    final_glb_path = os.path.join(OUTPUT_DIR, f"{job_id}_avatar.glb")
+    if os.path.exists(final_glb_path):
+        return FileResponse(final_glb_path, media_type="model/gltf-binary", filename=f"{job_id}_avatar.glb")
+    return {"error": "not_found"}

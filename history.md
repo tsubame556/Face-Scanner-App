@@ -33,3 +33,7 @@
 
 ## 2026-06-04 (Update 8)
 - **ドキュメント作成**: README.mdを作成し、全体の処理フローと独自開発の切り分けを文書化。
+
+## 2026-06-04 (Update 9)
+- **API追加**: FastAPIバックエンドにGLBファイルのダウンロード用エンドポイント（/api/v1/download/{job_id}）を追加。
+- **Unity設定変更**: AvatarFetcherの接続先をlocalhostに変更。
