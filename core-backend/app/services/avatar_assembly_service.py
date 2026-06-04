@@ -12,17 +12,32 @@ def assemble_avatar(base_head_path: str, teeth_model_path: str, hairstyle_id: in
     print(f"  [Avatar Assembly] 髪型アセットを適用: {hair_asset_path}")
     
     try:
-        # 各パーツのメッシュをロード
-        head_mesh = trimesh.load(base_head_path, force='mesh') if os.path.exists(base_head_path) and os.path.getsize(base_head_path) > 50 else trimesh.creation.icosphere()
+        # 1. 結合済みの頭部メッシュ（ベース＋ARKit顔面）をロード
+        if os.path.exists(base_head_path):
+            head_mesh = trimesh.load(base_head_path, force='mesh')
+        else:
+            raise FileNotFoundError(f"頭部メッシュが見つかりません: {base_head_path}")
+            
+        # 肌色の仮マテリアル（単色）を適用する
+        # ※本来はカメラ画像から生成したテクスチャをUVマッピングします
+        if hasattr(head_mesh.visual, 'face_colors'):
+            head_mesh.visual.face_colors = [255, 220, 177, 255] # 肌色
         
-        teeth_mesh = trimesh.creation.box(extents=[0.04, 0.01, 0.02])
+        # 2. 歯モデルをロードまたは生成
+        if os.path.exists(teeth_model_path):
+            teeth_mesh = trimesh.load(teeth_model_path, force='mesh')
+        else:
+            teeth_mesh = trimesh.creation.box(extents=[0.04, 0.01, 0.02])
         # 歯を適切な位置（口内）へオフセット
-        teeth_mesh.apply_translation([0, -0.05, 0.05])
+        teeth_mesh.apply_translation([0, 0.02, 0.05])
         
-        hair_mesh = trimesh.creation.capsule(radius=0.1, height=0.2)
-        # 髪を頭の上へオフセット
-        hair_mesh.apply_translation([0, 0.1, 0])
-        
+        # 3. 髪型アセットをロード
+        if os.path.exists(hair_asset_path):
+            hair_mesh = trimesh.load(hair_asset_path, force='mesh')
+        else:
+            hair_mesh = trimesh.creation.capsule(radius=0.1, height=0.2)
+            hair_mesh.apply_translation([0, 0.1, 0])
+            
         # 複数のメッシュをTrimeshのSceneに追加して結合
         scene = trimesh.Scene([head_mesh, teeth_mesh, hair_mesh])
         
