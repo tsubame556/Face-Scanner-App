@@ -27,3 +27,6 @@
 
 ## 2026-06-04 (Update 6)
 - **設定変更**: iOSアプリの送信先URLをMacの実際のローカルIP（10.46.3.210）に変更。
+
+## 2026-06-04 (Update 7)
+- **設定変更**: iOSアプリからMacへの通信URLをIPアドレス（10.46.3.210）からBonjourホスト名（yamamotokyousoranonotobukkukonpyuta.local）に変更。Wi-Fiの隔離設定を回避し、USBケーブル経由でも通信できるように修正。
