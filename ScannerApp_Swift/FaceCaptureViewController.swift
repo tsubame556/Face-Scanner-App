@@ -34,23 +34,33 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         super.viewDidLoad()
         setupUI()
         setupARSession()
+        
+        // バックグラウンド移行時のクラッシュを防ぐための監視
+        NotificationCenter.default.addObserver(self, selector: #selector(appWillResignActive), name: UIApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(appDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
     }
     
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        guard ARFaceTrackingConfiguration.isSupported else {
-            warningLabel.text = "エラー: FaceID(TrueDepth)非対応端末です。"
-            warningLabel.isHidden = false
-            return
-        }
+    @objc private func appWillResignActive() {
+        // アプリがバックグラウンドに行く時はカメラとGPUを停止する（IOGPUMetalError対策）
+        sceneView.session.pause()
+    }
+    
+    @objc private func appDidBecomeActive() {
+        // アプリが戻ってきたら再開する
+        guard ARFaceTrackingConfiguration.isSupported else { return }
         let config = ARFaceTrackingConfiguration()
         config.isLightEstimationEnabled = true
         sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
     }
     
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        appDidBecomeActive()
+    }
+    
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        sceneView.session.pause()
+        appWillResignActive()
     }
 
     // MARK: - Setup
