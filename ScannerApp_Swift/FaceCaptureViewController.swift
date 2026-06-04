@@ -225,7 +225,98 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         pronunciationButton.setTitle("録画中... (タップで完了)", for: .normal)
         pronunciationButton.backgroundColor = .systemGray
         
-        // TODO: ここで動画とDepthの保存を開始する
+        // TODO: ここでAVAssetWriterによる動画とDepthの保存を開始する
+        // 今回のベース実装では、シミュレーションとして数秒後に自動で完了扱いにして送信処理へ移行します。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+            self.stopPronunciationCapture()
+        }
+    }
+    
+    private func stopPronunciationCapture() {
+        instructionLabel.text = "撮影完了！サーバーへ送信中..."
+        pronunciationButton.isHidden = true
+        progressRing.isHidden = true
+        
+        // メッシュと動画(ダミー)をサーバーへ送信
+        exportAndUploadData()
+    }
+    
+    // MARK: - Network Upload
+    private func exportAndUploadData() {
+        guard let geometry = currentFaceAnchor?.geometry else {
+            warningLabel.text = "メッシュデータが見つかりません"
+            warningLabel.isHidden = false
+            return
+        }
+        
+        // 1. ARFaceGeometryをOBJ形式の文字列に変換
+        var objData = ""
+        for v in geometry.vertices {
+            objData += "v \(v.x) \(v.y) \(v.z)\n"
+        }
+        for t in geometry.textureCoordinates {
+            objData += "vt \(t.x) \(t.y)\n"
+        }
+        for n in geometry.normals {
+            objData += "vn \(n.x) \(n.y) \(n.z)\n"
+        }
+        // indicesは[v1, v2, v3, v1, v2, v3...]の1次元配列
+        let indices = geometry.triangleIndices
+        for i in stride(from: 0, to: indices.count, by: 3) {
+            let i1 = indices[i] + 1
+            let i2 = indices[i+1] + 1
+            let i3 = indices[i+2] + 1
+            objData += "f \(i1)/\(i1)/\(i1) \(i2)/\(i2)/\(i2) \(i3)/\(i3)/\(i3)\n"
+        }
+        
+        // 2. サーバーへ送信 (Multipart Form)
+        let url = URL(string: "http://192.168.x.x:8000/api/v1/generate_avatar")! // 実際のGPUサーバーのIPに変更
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        
+        let boundary = UUID().uuidString
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        
+        var body = Data()
+        
+        // メッシュデータ(OBJ)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"face_mesh_file\"; filename=\"face.obj\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: text/plain\r\n\r\n".data(using: .utf8)!)
+        body.append(objData.data(using: .utf8)!)
+        body.append("\r\n".data(using: .utf8)!)
+        
+        // 動画データ (ここではダミーバイト列)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"pronunciation_video\"; filename=\"pronunciation.mp4\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: video/mp4\r\n\r\n".data(using: .utf8)!)
+        body.append("DUMMY_VIDEO_DATA".data(using: .utf8)!)
+        body.append("\r\n".data(using: .utf8)!)
+        
+        // Blendshapes JSON (ここではダミーバイト列)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"blendshapes_json\"; filename=\"blendshapes.json\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/json\r\n\r\n".data(using: .utf8)!)
+        body.append("{\"jawOpen\": 0.8}".data(using: .utf8)!)
+        body.append("\r\n".data(using: .utf8)!)
+        
+        // 髪型ID
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"hairstyle_id\"\r\n\r\n".data(using: .utf8)!)
+        body.append("1\r\n".data(using: .utf8)!)
+        
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        
+        let task = URLSession.shared.uploadTask(with: request, from: body) { data, response, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    self.instructionLabel.text = "送信失敗: \(error.localizedDescription)"
+                    return
+                }
+                self.instructionLabel.text = "送信成功！\nGPUサーバーで生成処理を開始しました。"
+            }
+        }
+        task.resume()
     }
 }
 
