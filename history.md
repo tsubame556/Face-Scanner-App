@@ -12,3 +12,6 @@
   - `arkit_mesh_processor.py`: `trimesh` を用いたARKit顔メッシュの読み込みとスムージング処理（将来の胸像Stitching用ベース）を実装。
   - `mouth_teeth_service.py`: `cv2` (OpenCV) を用いた動画からの最大開口フレーム(`jawOpen`)の抽出と、歯メッシュのスケーリングシミュレーションを実装。
   - `avatar_assembly_service.py`: `trimesh.Scene` を用いて頭部・歯・髪型の3Dパーツを結合し、最終的な `.glb` を出力するアセンブリロジックを実装。
+
+## 2026-06-04 (Update 2)
+- **Unity GLBダウンロード処理**: `AvatarFetcher.cs` を新規作成し、GPUバックエンドから生成完了したGLBファイルを非同期でダウンロードし、`UniGLTF` (既存パッケージ) を用いてランタイムでシーン上にロード・インスタンス化する処理を実装。
