@@ -173,25 +173,38 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
     // MARK: - Angle Scanning Logic
     private func processAngleScanning(transform: simd_float4x4) {
         // TransformマトリックスからEuler角（Pitch, Yaw）を抽出
-        let pitch = asin(max(-1.0, min(1.0, transform.columns.2.y))) // 上下
-        let yaw = atan2(-transform.columns.2.x, transform.columns.2.z) // 左右
+        let pitch = asin(max(-1.0, min(1.0, transform.columns.2.y))) // 上下 (正: 下向き)
+        let yaw = atan2(-transform.columns.2.x, transform.columns.2.z) // 左右 (正: 左向き)
         
         // 角度（ラジアン）を度数法に変換
         let pitchDeg = pitch * 180 / .pi
         let yawDeg = yaw * 180 / .pi
         
-        // しきい値（約20度顔を傾けたらクリアとする）
-        let threshold: Float = 20.0
-        
         var detectedDirection: HeadDirection = .center
         
-        if pitchDeg > threshold {
-            detectedDirection = yawDeg > threshold ? .downLeft : (yawDeg < -threshold ? .downRight : .down)
-        } else if pitchDeg < -threshold {
-            detectedDirection = yawDeg > threshold ? .upLeft : (yawDeg < -threshold ? .upRight : .up)
-        } else {
-            if yawDeg > threshold { detectedDirection = .left }
-            else if yawDeg < -threshold { detectedDirection = .right }
+        // 顔の傾きの強さ（距離）を計算
+        let tiltDistance = sqrt(pitchDeg * pitchDeg + yawDeg * yawDeg)
+        
+        // 15度以上傾けていれば方向を判定する（以前より判定を甘くしました）
+        if tiltDistance > 15.0 {
+            // yaw(X軸=左右), pitch(Y軸=上下) の2D平面での角度を求める (-π 〜 π)
+            let angle = atan2(pitchDeg, yawDeg)
+            
+            // 45度(π/4)ごとの8方向に丸める
+            var sector = Int(round(angle / (.pi / 4)))
+            if sector < 0 { sector += 8 }
+            
+            switch sector {
+            case 0: detectedDirection = .left
+            case 1: detectedDirection = .downLeft
+            case 2: detectedDirection = .down
+            case 3: detectedDirection = .downRight
+            case 4: detectedDirection = .right
+            case 5: detectedDirection = .upRight
+            case 6: detectedDirection = .up
+            case 7: detectedDirection = .upLeft
+            default: break
+            }
         }
         
         if detectedDirection != .center && !capturedDirections.contains(detectedDirection) {
