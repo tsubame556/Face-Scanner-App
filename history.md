@@ -37,3 +37,6 @@
 ## 2026-06-04 (Update 9)
 - **API追加**: FastAPIバックエンドにGLBファイルのダウンロード用エンドポイント（/api/v1/download/{job_id}）を追加。
 - **Unity設定変更**: AvatarFetcherの接続先をlocalhostに変更。
+
+## 2026-06-04 (Update 10)
+- **Unity改修**: AvatarFetcherにStart()メソッドを追加し、Job IDが入力されていればPlayボタン押下時に自動でダウンロードが始まるように修正。
