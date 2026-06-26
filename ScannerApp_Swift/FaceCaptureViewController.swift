@@ -22,6 +22,7 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
     private var warningLabel: UILabel!
     private var progressRing: ProgressRingView!
     private var pronunciationButton: UIButton!
+    private var resendButton: UIButton!
     
     // MARK: - State
     private var currentState: CaptureState = .initialization
@@ -34,10 +35,42 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
     private var faceIndices = [Int16]()
     private var capturedImage: UIImage?
 
+
+    private func getDocumentsDirectory() -> URL {
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+    
+    private func checkSavedData() {
+        let jsonURL = getDocumentsDirectory().appendingPathComponent("saved_face_data.json")
+        let imageURL = getDocumentsDirectory().appendingPathComponent("saved_texture.jpg")
+        if FileManager.default.fileExists(atPath: jsonURL.path) && FileManager.default.fileExists(atPath: imageURL.path) {
+            DispatchQueue.main.async {
+                self.resendButton.isHidden = false
+            }
+        }
+    }
+    
+    @objc private func resendData() {
+        let jsonURL = getDocumentsDirectory().appendingPathComponent("saved_face_data.json")
+        let imageURL = getDocumentsDirectory().appendingPathComponent("saved_texture.jpg")
+        
+        guard let jsonData = try? Data(contentsOf: jsonURL),
+              let imageData = try? Data(contentsOf: imageURL) else {
+            instructionLabel.text = "保存されたデータが見つかりません"
+            return
+        }
+        
+        instructionLabel.text = "再アップロード中..."
+        resendButton.isHidden = true
+        pronunciationButton.isEnabled = false
+        uploadToServer(jsonData: jsonData, imageData: imageData)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
         setupARSession()
+        checkSavedData()
         
         NotificationCenter.default.addObserver(self, selector: #selector(appWillResignActive), name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(appDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
@@ -106,6 +139,17 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         pronunciationButton.translatesAutoresizingMaskIntoConstraints = false
         pronunciationButton.addTarget(self, action: #selector(startPronunciationCapture), for: .touchUpInside)
         view.addSubview(pronunciationButton)
+
+        resendButton = UIButton(type: .system)
+        resendButton.setTitle("前回のデータを再送信", for: .normal)
+        resendButton.titleLabel?.font = UIFont.boldSystemFont(ofSize: 18)
+        resendButton.backgroundColor = .systemGreen
+        resendButton.setTitleColor(.white, for: .normal)
+        resendButton.layer.cornerRadius = 25
+        resendButton.isHidden = true
+        resendButton.translatesAutoresizingMaskIntoConstraints = false
+        resendButton.addTarget(self, action: #selector(resendData), for: .touchUpInside)
+        view.addSubview(resendButton)
         
         NSLayoutConstraint.activate([
             instructionLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 40),
@@ -117,7 +161,12 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
             pronunciationButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -40),
             pronunciationButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             pronunciationButton.widthAnchor.constraint(equalToConstant: 250),
-            pronunciationButton.heightAnchor.constraint(equalToConstant: 50)
+            pronunciationButton.heightAnchor.constraint(equalToConstant: 50),
+            
+            resendButton.bottomAnchor.constraint(equalTo: pronunciationButton.topAnchor, constant: -20),
+            resendButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            resendButton.widthAnchor.constraint(equalToConstant: 250),
+            resendButton.heightAnchor.constraint(equalToConstant: 50)
         ])
     }
     
