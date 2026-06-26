@@ -181,6 +181,31 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
             // テクスチャ用の画像を取得しておく（ブレが少ない最初の数フレームなどで）
             if capturedImage == nil {
                 capturedImage = convertPixelBufferToUIImage(pixelBuffer: frame.capturedImage)
+                
+                // 真のUV座標を計算（カメラ投影マトリクスを使用）
+                if let faceAnchor = currentFaceAnchor {
+                    let viewportSize = capturedImage!.size
+                    let imageWidth = Float(viewportSize.width)
+                    let imageHeight = Float(viewportSize.height)
+                    
+                    var newUVs = [simd_float2]()
+                    
+                    for vertex in faceAnchor.geometry.vertices {
+                        // 1. ローカル座標をワールド座標に変換
+                        let vertex4 = simd_float4(vertex.x, vertex.y, vertex.z, 1.0)
+                        let worldPos4 = faceAnchor.transform * vertex4
+                        let worldPos3 = simd_float3(worldPos4.x, worldPos4.y, worldPos4.z)
+                        
+                        // 2. カメラのレンズ情報を用いて2Dピクセル座標へ投影
+                        let projected = frame.camera.projectPoint(worldPos3, orientation: .right, viewportSize: viewportSize)
+                        
+                        // 3. 0.0〜1.0のUV座標に正規化
+                        let u = Float(projected.x) / imageWidth
+                        let v = Float(projected.y) / imageHeight
+                        newUVs.append(simd_float2(u, v))
+                    }
+                    self.faceUVs = newUVs
+                }
             }
         }
     }
@@ -231,9 +256,8 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
             let vertices = Array(faceAnchor.geometry.vertices)
             vertexFrames.append(vertices)
             
-            // 初回にUVとインデックスを記録
-            if faceUVs.isEmpty {
-                faceUVs = Array(faceAnchor.geometry.textureCoordinates)
+            // 初回にインデックスを記録
+            if faceIndices.isEmpty {
                 faceIndices = Array(faceAnchor.geometry.triangleIndices)
             }
         }
