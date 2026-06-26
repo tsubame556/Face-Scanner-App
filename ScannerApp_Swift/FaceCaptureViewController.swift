@@ -197,7 +197,7 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
                         let worldPos3 = simd_float3(worldPos4.x, worldPos4.y, worldPos4.z)
                         
                         // 2. カメラのレンズ情報を用いて2Dピクセル座標へ投影
-                        let projected = frame.camera.projectPoint(worldPos3, orientation: .right, viewportSize: viewportSize)
+                        let projected = frame.camera.projectPoint(worldPos3, orientation: .landscapeRight, viewportSize: viewportSize)
                         
                         // 3. 0.0〜1.0のUV座標に正規化
                         let u = Float(projected.x) / imageWidth
