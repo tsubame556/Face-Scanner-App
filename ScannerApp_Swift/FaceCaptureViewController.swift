@@ -35,37 +35,6 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
     private var faceIndices = [Int16]()
     private var capturedImage: UIImage?
 
-
-    private func getDocumentsDirectory() -> URL {
-        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    }
-    
-    private func checkSavedData() {
-        let jsonURL = getDocumentsDirectory().appendingPathComponent("saved_face_data.json")
-        let imageURL = getDocumentsDirectory().appendingPathComponent("saved_texture.jpg")
-        if FileManager.default.fileExists(atPath: jsonURL.path) && FileManager.default.fileExists(atPath: imageURL.path) {
-            DispatchQueue.main.async {
-                self.resendButton.isHidden = false
-            }
-        }
-    }
-    
-    @objc private func resendData() {
-        let jsonURL = getDocumentsDirectory().appendingPathComponent("saved_face_data.json")
-        let imageURL = getDocumentsDirectory().appendingPathComponent("saved_texture.jpg")
-        
-        guard let jsonData = try? Data(contentsOf: jsonURL),
-              let imageData = try? Data(contentsOf: imageURL) else {
-            instructionLabel.text = "保存されたデータが見つかりません"
-            return
-        }
-        
-        instructionLabel.text = "再アップロード中..."
-        resendButton.isHidden = true
-        pronunciationButton.isEnabled = false
-        uploadToServer(jsonData: jsonData, imageData: imageData)
-    }
-
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
@@ -139,7 +108,7 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         pronunciationButton.translatesAutoresizingMaskIntoConstraints = false
         pronunciationButton.addTarget(self, action: #selector(startPronunciationCapture), for: .touchUpInside)
         view.addSubview(pronunciationButton)
-
+        
         resendButton = UIButton(type: .system)
         resendButton.setTitle("前回のデータを再送信", for: .normal)
         resendButton.titleLabel?.font = UIFont.boldSystemFont(ofSize: 18)
@@ -197,7 +166,7 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         
         instructionLabel.text = "再アップロード中..."
         resendButton.isHidden = true
-        startButton.isEnabled = false
+        pronunciationButton.isEnabled = false
         uploadToServer(jsonData: jsonData, imageData: imageData)
     }
 
@@ -492,7 +461,7 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
                 if let error = error {
                     self.instructionLabel.text = "送信失敗: サーバーに接続できません"
                     self.resendButton.isHidden = false
-                    self.startButton.isEnabled = true
+                    self.pronunciationButton.isEnabled = true
                     return
                 }
                 if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
