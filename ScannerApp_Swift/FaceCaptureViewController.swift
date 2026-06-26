@@ -31,7 +31,7 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
     // Data collection for median face
     private var vertexFrames = [[simd_float3]]()
     private var faceUVs = [simd_float2]()
-    private var faceIndices = [Int32]()
+    private var faceIndices = [Int16]()
     private var capturedImage: UIImage?
 
     override func viewDidLoad() {
