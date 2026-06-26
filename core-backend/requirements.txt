@@ -6,3 +6,6 @@ numpy
 opencv-python
 scipy
 pillow
+mediapipe
+opencv-python-headless
+Pillow
