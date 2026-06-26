@@ -292,7 +292,7 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         }
         
         // 2. サーバーへ送信 (Multipart Form)
-        let url = URL(string: "http://yamamotokyousoranonotobukkukonpyuta.local:8000/api/v1/generate_avatar")! // ローカルホスト名でUSB経由でも通信できるように変更
+        let url = URL(string: "http://10.18.166.109:8000/api/v1/generate_avatar")! // 現在のMacのローカルIPに変更
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         
@@ -332,9 +332,15 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         let task = URLSession.shared.uploadTask(with: request, from: body) { data, response, error in
             DispatchQueue.main.async {
                 if let error = error {
-                    self.instructionLabel.text = "送信失敗: \(error.localizedDescription)"
+                    self.instructionLabel.text = "送信失敗: サーバーに接続できません"
                     return
                 }
+                
+                if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                    self.instructionLabel.text = "送信失敗: サーバーエラー (\(httpResponse.statusCode))"
+                    return
+                }
+                
                 self.instructionLabel.text = "送信成功！\nGPUサーバーで生成処理を開始しました。"
             }
         }
