@@ -4,12 +4,12 @@ import SceneKit
 
 enum CaptureState {
     case initialization
-    case angleScanning   // 顔をぐるっと回して全角度のデータを取るフェーズ
-    case pronunciation   // 「あいうえお」を撮影するフェーズ
+    case angleScanning
+    case pronunciation
+    case processing
     case completed
 }
 
-// 顔の向くべき8方向（上、下、左、右、斜め4方向）
 enum HeadDirection: Int, CaseIterable {
     case center = 0, up, down, left, right, upLeft, upRight, downLeft, downRight
 }
@@ -26,27 +26,28 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
     // MARK: - State
     private var currentState: CaptureState = .initialization
     private var currentFaceAnchor: ARFaceAnchor?
-    
-    // どの方向を向き終わったかのフラグ
     private var capturedDirections: Set<HeadDirection> = [.center]
     
+    // Data collection for median face
+    private var vertexFrames = [[simd_float3]]()
+    private var faceUVs = [simd_float2]()
+    private var faceIndices = [Int32]()
+    private var capturedImage: UIImage?
+
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
         setupARSession()
         
-        // バックグラウンド移行時のクラッシュを防ぐための監視
         NotificationCenter.default.addObserver(self, selector: #selector(appWillResignActive), name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(appDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
     }
     
     @objc private func appWillResignActive() {
-        // アプリがバックグラウンドに行く時はカメラとGPUを停止する（IOGPUMetalError対策）
         sceneView.session.pause()
     }
     
     @objc private func appDidBecomeActive() {
-        // アプリが戻ってきたら再開する
         guard ARFaceTrackingConfiguration.isSupported else { return }
         let config = ARFaceTrackingConfiguration()
         config.isLightEstimationEnabled = true
@@ -63,7 +64,6 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         appWillResignActive()
     }
 
-    // MARK: - Setup
     private func setupUI() {
         view.backgroundColor = .black
         
@@ -73,13 +73,11 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         sceneView.automaticallyUpdatesLighting = true
         view.addSubview(sceneView)
         
-        // 進捗リング（FaceID風の円形UI）
         let ringSize: CGFloat = 280
         progressRing = ProgressRingView(frame: CGRect(x: 0, y: 0, width: ringSize, height: ringSize))
         progressRing.center = view.center
         view.addSubview(progressRing)
         
-        // 暗さ・影の警告ラベル（リングの上）
         warningLabel = UILabel()
         warningLabel.textColor = .systemYellow
         warningLabel.textAlignment = .center
@@ -89,7 +87,6 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         warningLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(warningLabel)
         
-        // 指示ラベル（画面上部）
         instructionLabel = UILabel()
         instructionLabel.textColor = .white
         instructionLabel.textAlignment = .center
@@ -99,7 +96,6 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(instructionLabel)
         
-        // あいうえお撮影ボタン（最初は隠しておく）
         pronunciationButton = UIButton(type: .system)
         pronunciationButton.setTitle("「あいうえお」撮影開始", for: .normal)
         pronunciationButton.titleLabel?.font = UIFont.boldSystemFont(ofSize: 18)
@@ -129,41 +125,45 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         currentState = .angleScanning
     }
 
-    // MARK: - ARSessionDelegate
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        // 環境光のチェック
         checkLightingConditions(lightEstimate: frame.lightEstimate)
+        
+        if currentState == .pronunciation {
+            // テクスチャ用の画像を取得しておく（ブレが少ない最初の数フレームなどで）
+            if capturedImage == nil {
+                capturedImage = convertPixelBufferToUIImage(pixelBuffer: frame.capturedImage)
+            }
+        }
     }
     
+    private func convertPixelBufferToUIImage(pixelBuffer: CVPixelBuffer) -> UIImage? {
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return nil }
+        // フロントカメラは右に90度回転しているので、upに変えることで正しい向きに
+        return UIImage(cgImage: cgImage, scale: 1.0, orientation: .right)
+    }
+
     private func checkLightingConditions(lightEstimate: ARLightEstimate?) {
         guard let estimate = lightEstimate else { return }
-        
         var warningText = ""
-        
-        // 部屋の明るさチェック (1000ルーメン以下は暗いと判定)
         if estimate.ambientIntensity < 800 {
             warningText += "部屋が暗すぎます。明るい場所へ移動してください。\n"
         }
-        
-        // 強い影（指向性ライト）のチェック
         if let directional = estimate as? ARDirectionalLightEstimate {
-            // primaryLightIntensity が強すぎると顔の半分に影ができる
             if directional.primaryLightIntensity > 1500 {
                 warningText += "顔に強い影が入っています。光の向きを調整してください。"
             }
         }
-        
         DispatchQueue.main.async {
             self.warningLabel.text = warningText
             self.warningLabel.isHidden = warningText.isEmpty
         }
     }
 
-    // MARK: - ARSCNViewDelegate
     func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {
         guard let faceAnchor = anchor as? ARFaceAnchor else { return }
         currentFaceAnchor = faceAnchor
-        
         DispatchQueue.main.async {
             if self.currentState == .angleScanning {
                 self.instructionLabel.text = "顔を円に沿ってゆっくり回してください"
@@ -177,33 +177,32 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         
         if currentState == .angleScanning {
             processAngleScanning(transform: faceAnchor.transform)
+        } else if currentState == .pronunciation {
+            // 毎フレームの頂点を記録する
+            let vertices = Array(faceAnchor.geometry.vertices)
+            vertexFrames.append(vertices)
+            
+            // 初回にUVとインデックスを記録
+            if faceUVs.isEmpty {
+                faceUVs = Array(faceAnchor.geometry.textureCoordinates)
+                faceIndices = Array(faceAnchor.geometry.triangleIndices)
+            }
         }
     }
     
-    // MARK: - Angle Scanning Logic
     private func processAngleScanning(transform: simd_float4x4) {
-        // TransformマトリックスからEuler角（Pitch, Yaw）を抽出
-        let pitch = asin(max(-1.0, min(1.0, transform.columns.2.y))) // 上下 (正: 下向き)
-        let yaw = atan2(-transform.columns.2.x, transform.columns.2.z) // 左右 (正: 左向き)
-        
-        // 角度（ラジアン）を度数法に変換
+        let pitch = asin(max(-1.0, min(1.0, transform.columns.2.y)))
+        let yaw = atan2(-transform.columns.2.x, transform.columns.2.z)
         let pitchDeg = pitch * 180 / .pi
         let yawDeg = yaw * 180 / .pi
         
         var detectedDirection: HeadDirection = .center
-        
-        // 顔の傾きの強さ（距離）を計算
         let tiltDistance = sqrt(pitchDeg * pitchDeg + yawDeg * yawDeg)
         
-        // 15度以上傾けていれば方向を判定する（以前より判定を甘くしました）
         if tiltDistance > 15.0 {
-            // yaw(X軸=左右), pitch(Y軸=上下) の2D平面での角度を求める (-π 〜 π)
             let angle = atan2(pitchDeg, yawDeg)
-            
-            // 45度(π/4)ごとの8方向に丸める
             var sector = Int(round(angle / (.pi / 4)))
             if sector < 0 { sector += 8 }
-            
             switch sector {
             case 0: detectedDirection = .left
             case 1: detectedDirection = .downLeft
@@ -219,11 +218,8 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         
         if detectedDirection != .center && !capturedDirections.contains(detectedDirection) {
             capturedDirections.insert(detectedDirection)
-            
             DispatchQueue.main.async {
                 self.progressRing.updateProgress(for: detectedDirection)
-                
-                // 8方向すべて完了したか？ (centerを含めて9)
                 if self.capturedDirections.count == HeadDirection.allCases.count {
                     self.scanningCompleted()
                 }
@@ -235,64 +231,145 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         currentState = .pronunciation
         instructionLabel.text = "スキャン完了！\n次に「あいうえお」を撮影します。"
         progressRing.setCompleted()
-        
-        // 録画ボタンを表示
         UIView.animate(withDuration: 0.5) {
             self.pronunciationButton.isHidden = false
         }
     }
 
-    // MARK: - Actions
     @objc private func startPronunciationCapture() {
-        instructionLabel.text = "「あ、い、う、え、お」と\nゆっくりはっきり発音してください"
-        pronunciationButton.setTitle("録画中... (タップで完了)", for: .normal)
-        pronunciationButton.backgroundColor = .systemGray
+        currentState = .pronunciation
+        vertexFrames.removeAll()
+        capturedImage = nil
         
-        // TODO: ここでAVAssetWriterによる動画とDepthの保存を開始する
-        // 今回のベース実装では、シミュレーションとして数秒後に自動で完了扱いにして送信処理へ移行します。
+        instructionLabel.text = "「あ、い、う、え、お」と\nゆっくりはっきり発音してください"
+        pronunciationButton.setTitle("録画中...", for: .normal)
+        pronunciationButton.backgroundColor = .systemGray
+        pronunciationButton.isUserInteractionEnabled = false
+        
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
             self.stopPronunciationCapture()
         }
     }
     
     private func stopPronunciationCapture() {
-        instructionLabel.text = "撮影完了！サーバーへ送信中..."
+        currentState = .processing
+        instructionLabel.text = "撮影完了！顔の中央値を計算中..."
         pronunciationButton.isHidden = true
         progressRing.isHidden = true
         
-        // メッシュと動画(ダミー)をサーバーへ送信
-        exportAndUploadData()
+        DispatchQueue.global(qos: .userInitiated).async {
+            self.processAndUploadData()
+        }
     }
     
-    // MARK: - Network Upload
-    private func exportAndUploadData() {
-        guard let geometry = currentFaceAnchor?.geometry else {
-            warningLabel.text = "メッシュデータが見つかりません"
-            warningLabel.isHidden = false
+    private func processAndUploadData() {
+        // 1. 中央値（ニュートラル顔）の計算
+        let medianVertices = calculateMedianVertices()
+        
+        // 2. 52個のBlendshape Deltasの抽出
+        let blendshapes = generateBlendshapeDeltas()
+        
+        // 3. JSON文字列の生成
+        var jsonDict = [String: Any]()
+        
+        // 頂点配列の変換
+        let vertsArray = medianVertices.map { [$0.x, $0.y, $0.z] }
+        jsonDict["neutral_vertices"] = vertsArray
+        
+        // UV配列の変換
+        let uvsArray = faceUVs.map { [$0.x, $0.y] }
+        jsonDict["uvs"] = uvsArray
+        
+        // インデックス配列の変換
+        jsonDict["indices"] = faceIndices
+        jsonDict["blendshapes"] = blendshapes
+        
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: jsonDict, options: []) else {
+            DispatchQueue.main.async {
+                self.instructionLabel.text = "JSON生成エラー"
+            }
             return
         }
         
-        // 1. ARFaceGeometryをOBJ形式の文字列に変換
-        var objData = ""
-        for v in geometry.vertices {
-            objData += "v \(v.x) \(v.y) \(v.z)\n"
-        }
-        for t in geometry.textureCoordinates {
-            objData += "vt \(t.x) \(t.y)\n"
-        }
-        
-        // indicesは[v1, v2, v3, v1, v2, v3...]の1次元配列
-        let indices = geometry.triangleIndices
-        for i in stride(from: 0, to: indices.count, by: 3) {
-            let i1 = indices[i] + 1
-            let i2 = indices[i+1] + 1
-            let i3 = indices[i+2] + 1
-            // 法線(vn)は省略し、頂点(v)とテクスチャ座標(vt)のみを指定
-            objData += "f \(i1)/\(i1) \(i2)/\(i2) \(i3)/\(i3)\n"
+        // 4. 画像データの取得
+        guard let image = capturedImage, let imageData = image.jpegData(compressionQuality: 0.8) else {
+            DispatchQueue.main.async {
+                self.instructionLabel.text = "画像取得エラー"
+            }
+            return
         }
         
-        // 2. サーバーへ送信 (Multipart Form)
-        let url = URL(string: "http://10.18.166.109:8000/api/v1/generate_avatar")! // 現在のMacのローカルIPに変更
+        // 5. 送信
+        DispatchQueue.main.async {
+            self.instructionLabel.text = "サーバーへアップロード中..."
+        }
+        
+        uploadToServer(jsonData: jsonData, imageData: imageData)
+    }
+    
+    private func calculateMedianVertices() -> [simd_float3] {
+        guard !vertexFrames.isEmpty else { return [] }
+        let vertexCount = vertexFrames[0].count
+        var medianVertices = [simd_float3]()
+        medianVertices.reserveCapacity(vertexCount)
+        
+        for i in 0..<vertexCount {
+            var xVals = [Float](); xVals.reserveCapacity(vertexFrames.count)
+            var yVals = [Float](); yVals.reserveCapacity(vertexFrames.count)
+            var zVals = [Float](); zVals.reserveCapacity(vertexFrames.count)
+            
+            for frame in vertexFrames {
+                xVals.append(frame[i].x)
+                yVals.append(frame[i].y)
+                zVals.append(frame[i].z)
+            }
+            
+            xVals.sort()
+            yVals.sort()
+            zVals.sort()
+            
+            let mid = vertexFrames.count / 2
+            let median = simd_float3(xVals[mid], yVals[mid], zVals[mid])
+            medianVertices.append(median)
+        }
+        return medianVertices
+    }
+    
+    private func generateBlendshapeDeltas() -> [String: [[Float]]] {
+        let allLocations: [ARFaceAnchor.BlendShapeLocation] = [
+            .browDownLeft, .browDownRight, .browInnerUp, .browOuterUpLeft, .browOuterUpRight,
+            .cheekPuff, .cheekSquintLeft, .cheekSquintRight,
+            .eyeBlinkLeft, .eyeBlinkRight, .eyeLookDownLeft, .eyeLookDownRight, .eyeLookInLeft, .eyeLookInRight,
+            .eyeLookOutLeft, .eyeLookOutRight, .eyeLookUpLeft, .eyeLookUpRight, .eyeSquintLeft, .eyeSquintRight, .eyeWideLeft, .eyeWideRight,
+            .jawForward, .jawLeft, .jawOpen, .jawRight,
+            .mouthClose, .mouthDimpleLeft, .mouthDimpleRight, .mouthFrownLeft, .mouthFrownRight, .mouthFunnel,
+            .mouthLeft, .mouthLowerDownLeft, .mouthLowerDownRight, .mouthPressLeft, .mouthPressRight, .mouthPucker,
+            .mouthRight, .mouthRollLower, .mouthRollUpper, .mouthShrugLower, .mouthShrugUpper, .mouthSmileLeft, .mouthSmileRight,
+            .mouthStretchLeft, .mouthStretchRight, .mouthUpperUpLeft, .mouthUpperUpRight,
+            .noseSneerLeft, .noseSneerRight, .tongueOut
+        ]
+        
+        guard let defaultGeometry = ARFaceGeometry(blendShapes: [:]) else { return [:] }
+        
+        var dict = [String: [[Float]]]()
+        
+        for loc in allLocations {
+            if let geo = ARFaceGeometry(blendShapes: [loc: 1.0]) {
+                var deltas = [[Float]]()
+                deltas.reserveCapacity(geo.vertices.count)
+                for i in 0..<geo.vertices.count {
+                    let v1 = geo.vertices[i]
+                    let v0 = defaultGeometry.vertices[i]
+                    deltas.append([v1.x - v0.x, v1.y - v0.y, v1.z - v0.z])
+                }
+                dict[loc.rawValue] = deltas
+            }
+        }
+        return dict
+    }
+    
+    private func uploadToServer(jsonData: Data, imageData: Data) {
+        let url = URL(string: "http://10.18.166.109:8000/api/v1/generate_avatar")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         
@@ -301,25 +378,18 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         
         var body = Data()
         
-        // メッシュデータ(OBJ)
+        // JSON
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"face_mesh_file\"; filename=\"face.obj\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: text/plain\r\n\r\n".data(using: .utf8)!)
-        body.append(objData.data(using: .utf8)!)
-        body.append("\r\n".data(using: .utf8)!)
-        
-        // 動画データ (ここではダミーバイト列)
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"pronunciation_video\"; filename=\"pronunciation.mp4\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: video/mp4\r\n\r\n".data(using: .utf8)!)
-        body.append("DUMMY_VIDEO_DATA".data(using: .utf8)!)
-        body.append("\r\n".data(using: .utf8)!)
-        
-        // Blendshapes JSON (ここではダミーバイト列)
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"blendshapes_json\"; filename=\"blendshapes.json\"\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"face_mesh_file\"; filename=\"face_data.json\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: application/json\r\n\r\n".data(using: .utf8)!)
-        body.append("{\"jawOpen\": 0.8}".data(using: .utf8)!)
+        body.append(jsonData)
+        body.append("\r\n".data(using: .utf8)!)
+        
+        // 画像
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"face_texture_file\"; filename=\"texture.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
         body.append("\r\n".data(using: .utf8)!)
         
         // 髪型ID
@@ -335,22 +405,18 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
                     self.instructionLabel.text = "送信失敗: サーバーに接続できません"
                     return
                 }
-                
                 if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
                     self.instructionLabel.text = "送信失敗: サーバーエラー (\(httpResponse.statusCode))"
                     return
                 }
-                
-                self.instructionLabel.text = "送信成功！\nGPUサーバーで生成処理を開始しました。"
+                self.instructionLabel.text = "送信成功！\nフルアバター生成を開始しました。"
             }
         }
         task.resume()
     }
 }
 
-// MARK: - Custom UI View (進捗リング)
 class ProgressRingView: UIView {
-    
     private var segmentLayers: [HeadDirection: CAShapeLayer] = [:]
     
     override init(frame: CGRect) {
@@ -366,44 +432,29 @@ class ProgressRingView: UIView {
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
         let radius = bounds.width / 2 - 10
         let segmentAngle = (2 * CGFloat.pi) / 8.0
-        let gap: CGFloat = 0.08 // セグメント間の隙間
+        let gap: CGFloat = 0.08
         
-        // 各方向に対応する中心角度 (0 は 3時の方向)
         let directionsMap: [(HeadDirection, CGFloat)] = [
-            (.right, 0),
-            (.downRight, .pi / 4),
-            (.down, .pi / 2),
-            (.downLeft, 3 * .pi / 4),
-            (.left, .pi),
-            (.upLeft, 5 * .pi / 4),
-            (.up, 3 * .pi / 2),
-            (.upRight, 7 * .pi / 4)
+            (.right, 0), (.downRight, .pi / 4), (.down, .pi / 2), (.downLeft, 3 * .pi / 4),
+            (.left, .pi), (.upLeft, 5 * .pi / 4), (.up, 3 * .pi / 2), (.upRight, 7 * .pi / 4)
         ]
         
         for (direction, angle) in directionsMap {
             let startAngle = angle - segmentAngle / 2 + gap
             let endAngle = angle + segmentAngle / 2 - gap
-            
-            let path = UIBezierPath(arcCenter: center,
-                                    radius: radius,
-                                    startAngle: startAngle,
-                                    endAngle: endAngle,
-                                    clockwise: true)
-            
+            let path = UIBezierPath(arcCenter: center, radius: radius, startAngle: startAngle, endAngle: endAngle, clockwise: true)
             let layer = CAShapeLayer()
             layer.path = path.cgPath
             layer.fillColor = UIColor.clear.cgColor
-            layer.strokeColor = UIColor.darkGray.cgColor // 未取得はダークグレー
+            layer.strokeColor = UIColor.darkGray.cgColor
             layer.lineWidth = 15
             layer.lineCap = .round
-            
             self.layer.addSublayer(layer)
             segmentLayers[direction] = layer
         }
     }
     
     func updateProgress(for direction: HeadDirection) {
-        // 対象の方向を取得したら、その部分の円弧だけを緑色に変更する
         if let layer = segmentLayers[direction] {
             layer.strokeColor = UIColor.systemGreen.cgColor
         }
@@ -413,8 +464,6 @@ class ProgressRingView: UIView {
         for layer in segmentLayers.values {
             layer.strokeColor = UIColor.systemGreen.cgColor
         }
-        
-        // 完了のポップアニメーション
         UIView.animate(withDuration: 0.3, animations: {
             self.transform = CGAffineTransform(scaleX: 1.1, y: 1.1)
         }) { _ in
