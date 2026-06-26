@@ -121,6 +121,37 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         ])
     }
     
+
+    private func getDocumentsDirectory() -> URL {
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+    
+    private func checkSavedData() {
+        let jsonURL = getDocumentsDirectory().appendingPathComponent("saved_face_data.json")
+        let imageURL = getDocumentsDirectory().appendingPathComponent("saved_texture.jpg")
+        if FileManager.default.fileExists(atPath: jsonURL.path) && FileManager.default.fileExists(atPath: imageURL.path) {
+            DispatchQueue.main.async {
+                self.resendButton.isHidden = false
+            }
+        }
+    }
+    
+    @objc private func resendData() {
+        let jsonURL = getDocumentsDirectory().appendingPathComponent("saved_face_data.json")
+        let imageURL = getDocumentsDirectory().appendingPathComponent("saved_texture.jpg")
+        
+        guard let jsonData = try? Data(contentsOf: jsonURL),
+              let imageData = try? Data(contentsOf: imageURL) else {
+            instructionLabel.text = "保存されたデータが見つかりません"
+            return
+        }
+        
+        instructionLabel.text = "再アップロード中..."
+        resendButton.isHidden = true
+        startButton.isEnabled = false
+        uploadToServer(jsonData: jsonData, imageData: imageData)
+    }
+
     private func setupARSession() {
         currentState = .angleScanning
     }
@@ -300,9 +331,17 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         }
         
         // 5. 送信
+
+        let jsonURL = getDocumentsDirectory().appendingPathComponent("saved_face_data.json")
+        let imageURL = getDocumentsDirectory().appendingPathComponent("saved_texture.jpg")
+        try? jsonData.write(to: jsonURL)
+        try? imageData.write(to: imageURL)
+        
         DispatchQueue.main.async {
             self.instructionLabel.text = "サーバーへアップロード中..."
+            self.resendButton.isHidden = true
         }
+
         
         uploadToServer(jsonData: jsonData, imageData: imageData)
     }
@@ -403,6 +442,8 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
             DispatchQueue.main.async {
                 if let error = error {
                     self.instructionLabel.text = "送信失敗: サーバーに接続できません"
+                    self.resendButton.isHidden = false
+                    self.startButton.isEnabled = true
                     return
                 }
                 if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
