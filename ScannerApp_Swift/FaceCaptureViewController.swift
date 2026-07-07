@@ -53,6 +53,12 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         guard ARFaceTrackingConfiguration.isSupported else { return }
         let config = ARFaceTrackingConfiguration()
         config.isLightEstimationEnabled = true
+        
+        // 利用可能なカメラ解像度のうち、最大のものを選択して高画質なテクスチャを取得する
+        if let highestResFormat = ARFaceTrackingConfiguration.supportedVideoFormats.max(by: { $0.imageResolution.width < $1.imageResolution.width }) {
+            config.videoFormat = highestResFormat
+        }
+        
         sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
     }
     
@@ -376,7 +382,8 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         }
         
         // 4. 画像データの取得
-        guard let image = capturedImage, let imageData = image.jpegData(compressionQuality: 0.8) else {
+        // 最高画質(1.0)でJPEG化することでテクスチャの荒れを防ぐ
+        guard let image = capturedImage, let imageData = image.jpegData(compressionQuality: 1.0) else {
             DispatchQueue.main.async {
                 self.instructionLabel.text = "画像取得エラー"
             }
