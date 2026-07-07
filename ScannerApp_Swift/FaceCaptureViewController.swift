@@ -218,7 +218,15 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
         let context = CIContext()
         guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return nil }
         // フロントカメラは右に90度回転しているので、upに変えることで正しい向きに
-        return UIImage(cgImage: cgImage, scale: 1.0, orientation: .right)
+        let rawImage = UIImage(cgImage: cgImage, scale: 1.0, orientation: .right)
+        
+        // Unity(glTF)はEXIFの回転フラグを無視するため、物理的にピクセルを再描画して正規化する
+        UIGraphicsBeginImageContextWithOptions(rawImage.size, false, 1.0)
+        rawImage.draw(in: CGRect(origin: .zero, size: rawImage.size))
+        let normalizedImage = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        
+        return normalizedImage
     }
 
     private func checkLightingConditions(lightEstimate: ARLightEstimate?) {
