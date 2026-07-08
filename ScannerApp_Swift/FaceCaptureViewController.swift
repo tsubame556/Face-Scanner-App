@@ -468,7 +468,8 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
     }
     
     private func uploadToServer(jsonData: Data, imageData: Data) {
-        let url = URL(string: "https://light-indexes-sperm-serves.trycloudflare.com/api/v1/generate_avatar")!
+        let serverURL = "https://microphone-monitor-zoning-summit.trycloudflare.com/api/v1/generate_avatar"
+        let url = URL(string: serverURL)!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         
