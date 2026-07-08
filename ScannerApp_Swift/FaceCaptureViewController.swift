@@ -198,8 +198,17 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
                         var newUVs = [simd_float2]()
                         
                         for vertex in faceAnchor.geometry.vertices {
+                            // エラや顔の輪郭（Zが奥のマイナス座標）は背景をサンプリングしやすいので、UV投影時のみ少し内側に絞る
+                            var uvVertex = vertex
+                            if vertex.z < 0 {
+                                let depth = abs(vertex.z)
+                                // 奥行きに比例してX座標（横幅）を絞る（最大で70%程度まで内側に寄せる）
+                                let shrinkX = max(0.7, 1.0 - (depth * 3.0))
+                                uvVertex.x *= shrinkX
+                            }
+
                             // 1. ローカル座標をワールド座標に変換
-                            let vertex4 = simd_float4(vertex.x, vertex.y, vertex.z, 1.0)
+                            let vertex4 = simd_float4(uvVertex.x, uvVertex.y, uvVertex.z, 1.0)
                             let worldPos4 = faceAnchor.transform * vertex4
                             let worldPos3 = simd_float3(worldPos4.x, worldPos4.y, worldPos4.z)
                             
