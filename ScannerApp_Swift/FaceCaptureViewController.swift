@@ -202,11 +202,9 @@ class FaceCaptureViewController: UIViewController, ARSessionDelegate, ARSCNViewD
                             var uvVertex = vertex
                             if vertex.z < 0 {
                                 let depth = abs(vertex.z)
-                                // 奥行きに比例してXとY座標を「強力に」内側に絞る（最大で40%程度まで内側に寄せる）
-                                // これにより、エラやアゴ下などカメラから見えない部分が背景の壁や服をサンプリングするのを完全に防ぎ、頬やアゴの肌色を引き伸ばす
-                                let shrink = max(0.4, 1.0 - (depth * 8.0))
-                                uvVertex.x *= shrink
-                                uvVertex.y *= shrink
+                                // 奥行きに比例してX座標（横幅）を絞る（最大で70%程度まで内側に寄せる）
+                                let shrinkX = max(0.7, 1.0 - (depth * 3.0))
+                                uvVertex.x *= shrinkX
                             }
 
                             // 1. ローカル座標をワールド座標に変換
